@@ -1,6 +1,16 @@
-import React from 'react';
-import ReactDOM from 'react-dom';
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 
 import App from './App/App';
 
-ReactDOM.render(<App />, document.getElementById('container'));
+const container = document.getElementById('container');
+
+if (container == null) {
+  throw new Error('Missing #container');
+}
+
+createRoot(container).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);

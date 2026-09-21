@@ -6,6 +6,10 @@ const config = require('./webpack.config');
 module.exports = merge(config, {
   mode: 'development',
   entry: './example/index.tsx',
+  output: {
+    path: require('path').resolve(__dirname, '../example-dist'),
+    filename: 'main.js',
+  },
   devtool: 'inline-source-map',
   devServer: {
     port: 8000,
