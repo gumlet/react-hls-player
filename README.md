@@ -1,7 +1,7 @@
 # React Player HLS
 
-![NPM Downloads](https://img.shields.io/npm/dm/@gumlet/react-hls-player?style=flat-square)
-![npm bundle size](https://img.shields.io/bundlephobia/min/@gumlet/react-hls-player)
+[![npm version](https://img.shields.io/npm/v/@gumlet/react-hls-player?style=flat-square)](https://www.npmjs.com/package/@gumlet/react-hls-player)
+[![npm downloads](https://img.shields.io/npm/dm/@gumlet/react-hls-player?style=flat-square)](https://www.npmjs.com/package/@gumlet/react-hls-player)
 
 ## Introduction
 
