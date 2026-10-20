@@ -19,7 +19,7 @@ jobs:
           package-manager-cache: false
       - name: Install, test, and build
         run: |
-          npm ci
+          npm i
           npm test
           npm run typecheck
           npm run build
@@ -39,5 +39,5 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Publish
         run: |
-          npm ci
+          npm i
           npm publish --provenance
