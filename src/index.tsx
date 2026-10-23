@@ -1,11 +1,20 @@
+import { GumletInsights } from '@gumlet/insights-js-core';
 import React, { forwardRef, useEffect, useRef } from 'react';
-import Hls, { type ErrorData } from 'hls.js';
-import { isNativeHlsSupported } from './nativeHls';
+import shaka from 'shaka-player';
+import { version } from '../package.json';
+import { buildEmbedPlayerConfig, lockHighestVariant } from './drm/abrSettings';
+import { applyDrm } from './drm/applyDrm';
+import { parsePlaybackUrl } from './playbackUrl';
 import type { HlsPlayerProps, TimeEventData } from './types';
 
-export { isNativeHlsSupported } from './nativeHls';
+const PLAYER_NAME = 'gumlet-react-hls-player';
+
 export type {
+  AnalyticsConfig,
+  DrmConfig,
   HlsPlayerProps,
+  InsightsConfig,
+  PlayerConfig,
   PlayerErrorData,
   ProgressEventData,
   QualityChangeData,
@@ -15,19 +24,15 @@ export type {
 
 const DEFAULT_MAX_FATAL_RETRIES = 3;
 
+const AUTOPLAY_BLOCKED_MESSAGE =
+  'Unable to autoplay prior to user interaction with the DOM.';
+
 function setRef<T>(ref: React.Ref<T> | undefined, value: T | null) {
   if (typeof ref === 'function') {
     ref(value);
   } else if (ref != null) {
     (ref as React.MutableRefObject<T | null>).current = value;
   }
-}
-
-function shouldUseHlsJs(preferNativeHls: boolean): boolean {
-  if (preferNativeHls && isNativeHlsSupported()) {
-    return false;
-  }
-  return Hls.isSupported();
 }
 
 function timeEvent(video: HTMLVideoElement): TimeEventData {
@@ -37,15 +42,35 @@ function timeEvent(video: HTMLVideoElement): TimeEventData {
   };
 }
 
+function isNonRetryableDrmCode(code: number): boolean {
+  return (code >= 6000 && code <= 6010) || (code >= 3014 && code <= 3016);
+}
+
+function shakaErrorDetail(event: Event): shaka.util.Error | undefined {
+  const detail = (event as CustomEvent<shaka.util.Error | undefined>).detail;
+  return detail ?? undefined;
+}
+
+function playIfAllowed(video: HTMLVideoElement) {
+  video.play().catch(() => {
+    console.log(AUTOPLAY_BLOCKED_MESSAGE);
+  });
+}
+
 const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
   function ReactHlsPlayer(
     {
-      hlsConfig,
+      playerConfig,
       playerRef,
-      getHLSRef,
+      getPlayerRef,
       src,
       autoPlay,
-      preferNativeHls = true,
+      muted,
+      aspectRatio,
+      startHighestRes = false,
+      drm,
+      enableInsights = true,
+      insights,
       maxFatalRetries = DEFAULT_MAX_FATAL_RETRIES,
       onReady,
       onPlay,
@@ -65,9 +90,11 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
     forwardedRef
   ) {
     const internalRef = useRef<HTMLVideoElement | null>(null);
-    const useHlsJs = shouldUseHlsJs(preferNativeHls);
+    const autoPlayRef = useRef(autoPlay);
+    autoPlayRef.current = autoPlay;
+
     const callbacksRef = useRef({
-      getHLSRef,
+      getPlayerRef,
       onReady,
       onPlay,
       onPause,
@@ -83,7 +110,7 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
       onError,
     });
     callbacksRef.current = {
-      getHLSRef,
+      getPlayerRef,
       onReady,
       onPlay,
       onPause,
@@ -98,6 +125,13 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
       onQualityChange,
       onError,
     };
+
+    const widevineLicenseUri = drm?.widevineLicenseUri;
+    const widevineRobustness = drm?.widevineRobustness;
+    const organizationId = drm?.organizationId;
+    const collectionId = drm?.collectionId;
+    const fairplayLicenseUri = drm?.fairplayLicenseUri;
+    const fairplayCertificateUri = drm?.fairplayCertificateUri;
 
     const setVideoRef = (node: HTMLVideoElement | null) => {
       internalRef.current = node;
@@ -168,153 +202,214 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
       if (!video) {
         return;
       }
+      if (muted != null) {
+        video.muted = muted;
+      }
+      if (autoPlay) {
+        playIfAllowed(video);
+      }
+    }, [autoPlay, muted]);
 
-      if (!shouldUseHlsJs(preferNativeHls)) {
-        if (!isNativeHlsSupported(video)) {
-          const message =
-            'HLS playback is not supported in this browser (no MSE and no native HLS).';
-          console.error(message);
-          callbacksRef.current.onError?.({
-            fatal: true,
-            source: 'video',
-            message,
-          });
-          callbacksRef.current.getHLSRef?.(null);
-          return;
-        }
+    useEffect(() => {
+      const video = internalRef.current;
+      if (!video) {
+        return;
+      }
+      const media = video;
+      const starttime = Date.now();
 
-        const handleReady = () => callbacksRef.current.onReady?.();
-        video.addEventListener('loadedmetadata', handleReady);
-        video.src = src;
-        if (autoPlay) {
-          video.play().catch(() => {
-            console.log(
-              'Unable to autoplay prior to user interaction with the DOM.'
-            );
-          });
-        }
-
-        return () => {
-          video.removeEventListener('loadedmetadata', handleReady);
-          video.removeAttribute('src');
-          video.load();
-          callbacksRef.current.getHLSRef?.(null);
-        };
+      let playback: ReturnType<typeof parsePlaybackUrl>;
+      try {
+        playback = parsePlaybackUrl(src);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Invalid playback URL';
+        callbacksRef.current.onError?.({
+          fatal: true,
+          source: 'video',
+          message,
+        });
+        throw error instanceof Error ? error : new Error(message);
       }
 
-      let hls: Hls | undefined;
-      let fatalRetries = 0;
+      if (!shaka.Player.isBrowserSupported()) {
+        const message = 'Browser does not support Shaka Player';
+        console.error(message);
+        callbacksRef.current.onError?.({
+          fatal: true,
+          source: 'shaka',
+          message,
+        });
+        callbacksRef.current.getPlayerRef?.(null);
+        return;
+      }
+
       let destroyed = false;
-      let readyEmitted = false;
+      let fatalRetries = 0;
+      let unbindDrm = () => {};
+      let insightsClient: GumletInsights | undefined;
 
-      function initPlayer() {
-        if (destroyed || internalRef.current == null) {
+      shaka.polyfill.installAll();
+
+      const player = new shaka.Player();
+      window.shaka = shaka;
+      window.shakaPlayer = player;
+      callbacksRef.current.getPlayerRef?.(player);
+
+      const drmConfig = {
+        widevineLicenseUri,
+        widevineRobustness,
+        organizationId,
+        collectionId,
+        fairplayLicenseUri,
+        fairplayCertificateUri,
+      };
+      const fairPlay = Boolean(fairplayLicenseUri && fairplayCertificateUri);
+
+      function finishLoad() {
+        if (destroyed) {
+          return;
+        }
+        if (startHighestRes) {
+          lockHighestVariant(player);
+        }
+        callbacksRef.current.onManifestParsed?.();
+        callbacksRef.current.onReady?.();
+        if (autoPlayRef.current) {
+          playIfAllowed(media);
+        }
+      }
+
+      function onShakaError(event: Event) {
+        if (destroyed) {
+          return;
+        }
+        const detail = shakaErrorDetail(event);
+        const fatal = detail?.severity === shaka.util.Error.Severity.CRITICAL;
+        const code = typeof detail?.code === 'number' ? detail.code : undefined;
+        callbacksRef.current.onError?.({
+          fatal,
+          source: 'shaka',
+          data: detail,
+          message: detail?.message || (code != null ? String(code) : undefined),
+        });
+
+        if (!fatal) {
           return;
         }
 
-        if (hls != null) {
-          hls.destroy();
+        if (code != null && isNonRetryableDrmCode(code)) {
+          console.error('Shaka DRM error', detail);
+          return;
         }
 
-        window.Hls = Hls;
+        fatalRetries += 1;
+        console.error('Shaka fatal error', detail);
 
-        const newHls = new Hls({
-          ...hlsConfig,
-        });
+        if (fatalRetries > maxFatalRetries) {
+          console.error(
+            `Shaka fatal error: exhausted ${maxFatalRetries} retries`,
+            detail
+          );
+          return;
+        }
 
-        callbacksRef.current.getHLSRef?.(newHls);
-
-        newHls.attachMedia(internalRef.current);
-
-        newHls.on(Hls.Events.MEDIA_ATTACHED, () => {
-          newHls.loadSource(src);
-        });
-
-        newHls.on(Hls.Events.MANIFEST_PARSED, () => {
-          callbacksRef.current.onManifestParsed?.();
-          if (!readyEmitted) {
-            readyEmitted = true;
-            callbacksRef.current.onReady?.();
-          }
-          if (autoPlay) {
-            internalRef.current
-              ?.play()
-              .catch(() =>
-                console.log(
-                  'Unable to autoplay prior to user interaction with the DOM.'
-                )
-              );
-          }
-        });
-
-        newHls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-          const level = newHls.levels[data.level];
-          callbacksRef.current.onQualityChange?.({
-            level: data.level,
-            height: level?.height,
-            bitrate: level?.bitrate,
-          });
-        });
-
-        newHls.on(Hls.Events.ERROR, (_event, data: ErrorData) => {
-          callbacksRef.current.onError?.({
-            fatal: data.fatal,
-            source: 'hls',
-            data,
-            message: data.details,
-          });
-
-          if (!data.fatal) {
-            return;
-          }
-
-          fatalRetries += 1;
-          console.error('HLS fatal error', data);
-
-          if (fatalRetries > maxFatalRetries) {
-            console.error(
-              `HLS fatal error: exhausted ${maxFatalRetries} retries`,
-              data
-            );
-            newHls.destroy();
-            callbacksRef.current.getHLSRef?.(null);
-            return;
-          }
-
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              newHls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              newHls.recoverMediaError();
-              break;
-            default:
-              initPlayer();
-              break;
-          }
-        });
-
-        hls = newHls;
+        player
+          .load(src)
+          .then(finishLoad)
+          .catch(() => {});
       }
 
-      initPlayer();
+      function onAdaptation() {
+        const active = player.getVariantTracks().find((track) => track.active);
+        if (!active) {
+          return;
+        }
+        callbacksRef.current.onQualityChange?.({
+          level: active.id,
+          height: active.height ?? undefined,
+          bitrate: active.bandwidth,
+        });
+      }
+
+      player.addEventListener('error', onShakaError);
+      player.addEventListener('adaptation', onAdaptation);
+
+      void (async () => {
+        try {
+          await player.attach(media);
+          if (destroyed) {
+            return;
+          }
+          if (playerConfig) {
+            player.configure(playerConfig);
+          }
+          player.configure(
+            buildEmbedPlayerConfig({
+              aspectRatio,
+              startHighestRes,
+              fairPlay,
+            })
+          );
+          unbindDrm = applyDrm(player, drmConfig);
+          if (enableInsights && !destroyed) {
+            insightsClient = new GumletInsights({
+              ...insights,
+              workspace_id: playback.collectionId,
+              customVideoId: insights?.customVideoId ?? playback.assetId,
+              customPlayerName: PLAYER_NAME,
+              customPlayerVersion: version,
+            });
+            try {
+              await insightsClient.attach(player, {
+                mediaElement: media,
+                starttime,
+              });
+            } catch (error) {
+              console.error('Failed to initialize Gumlet Insights', error);
+            }
+            if (destroyed) {
+              insightsClient.detach();
+              return;
+            }
+          }
+          await player.load(src);
+          finishLoad();
+        } catch {
+          /* Shaka also dispatches `error`, which owns retry. */
+        }
+      })();
 
       return () => {
         destroyed = true;
-        if (hls != null) {
-          hls.destroy();
+        insightsClient?.detach();
+        unbindDrm();
+        player.removeEventListener('error', onShakaError);
+        player.removeEventListener('adaptation', onAdaptation);
+        void player.destroy();
+        if (window.shakaPlayer === player) {
+          window.shakaPlayer = undefined;
         }
-        callbacksRef.current.getHLSRef?.(null);
+        callbacksRef.current.getPlayerRef?.(null);
       };
-    }, [autoPlay, hlsConfig, src, preferNativeHls, maxFatalRetries]);
+    }, [
+      aspectRatio,
+      collectionId,
+      enableInsights,
+      fairplayCertificateUri,
+      fairplayLicenseUri,
+      insights,
+      maxFatalRetries,
+      organizationId,
+      playerConfig,
+      src,
+      startHighestRes,
+      widevineLicenseUri,
+      widevineRobustness,
+    ]);
 
     return (
-      <video
-        {...props}
-        ref={setVideoRef}
-        autoPlay={autoPlay}
-        src={useHlsJs ? undefined : src}
-      />
+      <video {...props} ref={setVideoRef} autoPlay={autoPlay} muted={muted} />
     );
   }
 );

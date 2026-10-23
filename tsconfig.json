@@ -5,6 +5,7 @@
     "module": "ES2015",
     "declaration": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "moduleResolution": "node",
     "removeComments": true,
     "jsx": "react",

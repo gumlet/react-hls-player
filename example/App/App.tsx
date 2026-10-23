@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type Hls from 'hls.js';
 
 import HlsPlayer from '../../src';
 import type {
@@ -41,6 +40,9 @@ function stringify(value: unknown) {
 function App() {
   const playerRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const widevineRef = useRef<HTMLInputElement>(null);
+  const fairplayLicenseRef = useRef<HTMLInputElement>(null);
+  const fairplayCertRef = useRef<HTMLInputElement>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const logIdRef = useRef(0);
   const lastHighFreqRef = useRef<Record<string, number>>({});
@@ -48,33 +50,42 @@ function App() {
     'https://video.gumlet.io/5f462c1561cf8a766464ffc4/635789f017629894d4d125a4/main.m3u8'
   );
   const [destroy, setDestroy] = useState(false);
-  const [preferNativeHls, setPreferNativeHls] = useState(true);
+  const [muted, setMuted] = useState(true);
+  const [autoPlay, setAutoPlay] = useState(true);
+  const [startHighestRes, setStartHighestRes] = useState(false);
+  const [widevineLicenseUri, setWidevineLicenseUri] = useState('');
+  const [fairplayLicenseUri, setFairplayLicenseUri] = useState('');
+  const [fairplayCertificateUri, setFairplayCertificateUri] = useState('');
+  const [loadId, setLoadId] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  const appendLog = useCallback((name: string, payload?: unknown, throttle = false) => {
-    if (throttle) {
-      const now = Date.now();
-      if (now - (lastHighFreqRef.current[name] ?? 0) < HIGH_FREQ_MS) {
-        return;
+  const appendLog = useCallback(
+    (name: string, payload?: unknown, throttle = false) => {
+      if (throttle) {
+        const now = Date.now();
+        if (now - (lastHighFreqRef.current[name] ?? 0) < HIGH_FREQ_MS) {
+          return;
+        }
+        lastHighFreqRef.current[name] = now;
       }
-      lastHighFreqRef.current[name] = now;
-    }
 
-    const entry: LogEntry = {
-      id: ++logIdRef.current,
-      time: formatTime(),
-      name,
-      detail: stringify(payload),
-    };
+      const entry: LogEntry = {
+        id: ++logIdRef.current,
+        time: formatTime(),
+        name,
+        detail: stringify(payload),
+      };
 
-    setLogs((prev) => {
-      const next = [...prev, entry];
-      if (next.length > MAX_LOG_ENTRIES) {
-        return next.slice(next.length - MAX_LOG_ENTRIES);
-      }
-      return next;
-    });
-  }, []);
+      setLogs((prev) => {
+        const next = [...prev, entry];
+        if (next.length > MAX_LOG_ENTRIES) {
+          return next.slice(next.length - MAX_LOG_ENTRIES);
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     const box = logBoxRef.current;
@@ -83,81 +94,149 @@ function App() {
     }
   }, [logs]);
 
-  function _handleEnter(e: React.KeyboardEvent) {
-    if (e.key === 'Enter') {
-      setHlsUrl(inputRef.current?.value ?? '');
+  function loadVideo() {
+    setHlsUrl(inputRef.current?.value.trim() ?? '');
+    setWidevineLicenseUri(widevineRef.current?.value.trim() ?? '');
+    setFairplayLicenseUri(fairplayLicenseRef.current?.value.trim() ?? '');
+    setFairplayCertificateUri(fairplayCertRef.current?.value.trim() ?? '');
+    setDestroy(false);
+    setLoadId((id) => id + 1);
+    appendLog('load');
+  }
+
+  function commitUrl(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      loadVideo();
     }
   }
 
-  function _handleDestroyClick() {
-    setDestroy(true);
-    appendLog('destroy');
-  }
-
-  function _handleToggleControls() {
-    if (playerRef.current?.hasAttribute('controls')) {
-      playerRef.current.removeAttribute('controls');
-      appendLog('controls', { enabled: false });
-    } else {
-      playerRef.current?.setAttribute('controls', 'true');
-      appendLog('controls', { enabled: true });
+  function commitOnEnter(
+    event: React.KeyboardEvent<HTMLInputElement>,
+    apply: (value: string) => void
+  ) {
+    if (event.key === 'Enter') {
+      apply(event.currentTarget.value.trim());
     }
   }
+
+  const drm =
+    widevineLicenseUri || fairplayLicenseUri || fairplayCertificateUri
+      ? {
+          ...(widevineLicenseUri ? { widevineLicenseUri } : {}),
+          ...(fairplayLicenseUri ? { fairplayLicenseUri } : {}),
+          ...(fairplayCertificateUri ? { fairplayCertificateUri } : {}),
+        }
+      : undefined;
 
   return (
     <div>
-      <div
-        style={{
-          margin: '0 0 20px',
-        }}
-      >
+      <div style={{ margin: '0 0 20px' }}>
         <label
-          style={{
-            display: 'block',
-            marginBottom: 10,
-          }}
+          style={{ display: 'block', marginBottom: 10 }}
           htmlFor="url-input"
         >
-          hls url :{' '}
+          stream url :{' '}
         </label>
-        <input
-          ref={inputRef}
-          id="url-input"
-          type="text"
-          defaultValue={hlsUrl}
-          onKeyUp={_handleEnter}
-          style={{
-            width: '100%',
-            height: '30px',
-            lineHeight: '30px',
-            fontSize: '16px',
-            color: '#333',
-          }}
-        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            ref={inputRef}
+            id="url-input"
+            type="text"
+            defaultValue={hlsUrl}
+            onKeyUp={commitUrl}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          />
+          <button
+            type="button"
+            style={{ padding: '5px 12px' }}
+            onClick={loadVideo}
+          >
+            Load
+          </button>
+        </div>
       </div>
 
-      <label htmlFor="prefer-native" style={{ display: 'block', marginBottom: 12 }}>
+      <label htmlFor="widevine-input" style={labelStyle}>
+        widevine license URI
+      </label>
+      <input
+        ref={widevineRef}
+        id="widevine-input"
+        type="text"
+        placeholder="blank for clear playback"
+        defaultValue={widevineLicenseUri}
+        onKeyUp={(event) => commitOnEnter(event, setWidevineLicenseUri)}
+        style={inputStyle}
+      />
+
+      <label htmlFor="fairplay-license-input" style={labelStyle}>
+        fairplay license URI
+      </label>
+      <input
+        ref={fairplayLicenseRef}
+        id="fairplay-license-input"
+        type="text"
+        defaultValue={fairplayLicenseUri}
+        onKeyUp={(event) => commitOnEnter(event, setFairplayLicenseUri)}
+        style={inputStyle}
+      />
+
+      <label htmlFor="fairplay-cert-input" style={labelStyle}>
+        fairplay certificate URI
+      </label>
+      <input
+        ref={fairplayCertRef}
+        id="fairplay-cert-input"
+        type="text"
+        defaultValue={fairplayCertificateUri}
+        onKeyUp={(event) => commitOnEnter(event, setFairplayCertificateUri)}
+        style={{ ...inputStyle, marginBottom: 12 }}
+      />
+
+      <label htmlFor="muted" style={checkStyle}>
         <input
-          id="prefer-native"
+          id="muted"
           type="checkbox"
-          checked={preferNativeHls}
-          onChange={(e) => setPreferNativeHls(e.target.checked)}
+          checked={muted}
+          onChange={(event) => setMuted(event.target.checked)}
         />{' '}
-        prefer native HLS
+        muted
+      </label>
+      <label htmlFor="autoplay" style={checkStyle}>
+        <input
+          id="autoplay"
+          type="checkbox"
+          checked={autoPlay}
+          onChange={(event) => setAutoPlay(event.target.checked)}
+        />{' '}
+        autoplay
+      </label>
+      <label htmlFor="start-highest" style={checkStyle}>
+        <input
+          id="start-highest"
+          type="checkbox"
+          checked={startHighestRes}
+          onChange={(event) => setStartHighestRes(event.target.checked)}
+        />{' '}
+        start highest resolution
       </label>
 
       {!destroy ? (
         <HlsPlayer
-          loop={true}
+          key={loadId}
+          loop
           width="100%"
           height="auto"
-          autoPlay
+          autoPlay={autoPlay}
+          muted={muted}
           controls
+          playsInline
           playerRef={playerRef}
           src={hlsUrl}
-          preferNativeHls={preferNativeHls}
-          getHLSRef={(hls: Hls | null) => {
-            appendLog('getHLSRef', hls ? 'hls.js instance' : null);
+          startHighestRes={startHighestRes}
+          drm={drm}
+          getPlayerRef={(player) => {
+            appendLog('getPlayerRef', player ? 'shaka.Player' : null);
           }}
           onReady={() => appendLog('onReady')}
           onPlay={() => appendLog('onPlay')}
@@ -192,29 +271,31 @@ function App() {
       <br />
 
       <button
-        style={{
-          padding: '5px 10px',
+        style={{ padding: '5px 10px' }}
+        onClick={() => {
+          setDestroy(true);
+          appendLog('destroy');
         }}
-        onClick={_handleDestroyClick}
       >
         Destroy Video
       </button>
 
       <button
-        style={{
-          padding: '5px 10px',
+        style={{ padding: '5px 10px' }}
+        onClick={() => {
+          if (playerRef.current?.hasAttribute('controls')) {
+            playerRef.current.removeAttribute('controls');
+            appendLog('controls', { enabled: false });
+          } else {
+            playerRef.current?.setAttribute('controls', 'true');
+            appendLog('controls', { enabled: true });
+          }
         }}
-        onClick={_handleToggleControls}
       >
         Toggle Controls (via custom ref)
       </button>
 
-      <button
-        style={{
-          padding: '5px 10px',
-        }}
-        onClick={() => setLogs([])}
-      >
+      <button style={{ padding: '5px 10px' }} onClick={() => setLogs([])}>
         Clear log
       </button>
 
@@ -247,5 +328,24 @@ function App() {
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  height: '30px',
+  lineHeight: '30px',
+  fontSize: '16px',
+  color: '#333',
+  marginBottom: 10,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  marginBottom: 6,
+};
+
+const checkStyle: React.CSSProperties = {
+  display: 'block',
+  marginBottom: 8,
+};
 
 export default App;

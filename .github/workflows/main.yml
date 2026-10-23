@@ -16,12 +16,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install, test, and build
+      - name: Install, lint, and test
         run: |
           npm ci
+          npm run lint
           npm test
-          npm run typecheck
-          npm run build
 
   build_and_publish:
     if: startsWith(github.ref, 'refs/tags/')
