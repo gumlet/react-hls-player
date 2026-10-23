@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnusedImports: React is required by the classic JSX transform.
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 

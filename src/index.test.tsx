@@ -1,4 +1,5 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
+// biome-ignore lint/correctness/noUnusedImports: React is required by the classic JSX transform.
 import React, { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { version } from '../package.json';

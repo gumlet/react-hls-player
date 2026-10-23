@@ -6,5 +6,3 @@ declare global {
     shakaPlayer?: shaka.Player;
   }
 }
-
-export {};

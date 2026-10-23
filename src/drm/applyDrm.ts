@@ -1,4 +1,4 @@
-import shaka from 'shaka-player';
+import type shaka from 'shaka-player';
 import type { DrmConfig } from '../types';
 import { PREFERRED_AVC_VIDEO, PREFERRED_SAFARI_VIDEO } from './abrSettings';
 import {

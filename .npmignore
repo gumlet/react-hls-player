@@ -1,6 +1,5 @@
 .all-contributorsrc
-.eslintrc
-.prettierrc
+.biome.json
 tsconfig.json
 typings/
 webpack/

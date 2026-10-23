@@ -1,3 +1,4 @@
+// biome-ignore lint/style/useImportType: TypeScript uses the classic JSX transform.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import HlsPlayer from '../../src';
@@ -87,6 +88,7 @@ function App() {
     []
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Logs intentionally retrigger auto-scroll.
   useEffect(() => {
     const box = logBoxRef.current;
     if (box) {
@@ -271,6 +273,7 @@ function App() {
       <br />
 
       <button
+        type="button"
         style={{ padding: '5px 10px' }}
         onClick={() => {
           setDestroy(true);
@@ -281,6 +284,7 @@ function App() {
       </button>
 
       <button
+        type="button"
         style={{ padding: '5px 10px' }}
         onClick={() => {
           if (playerRef.current?.hasAttribute('controls')) {
@@ -295,7 +299,11 @@ function App() {
         Toggle Controls (via custom ref)
       </button>
 
-      <button style={{ padding: '5px 10px' }} onClick={() => setLogs([])}>
+      <button
+        type="button"
+        style={{ padding: '5px 10px' }}
+        onClick={() => setLogs([])}
+      >
         Clear log
       </button>
 

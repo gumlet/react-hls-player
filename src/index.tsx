@@ -1,4 +1,5 @@
 import { GumletInsights } from '@gumlet/insights-js-core';
+// biome-ignore lint/style/useImportType: TypeScript uses the classic JSX transform.
 import React, { forwardRef, useEffect, useRef } from 'react';
 import shaka from 'shaka-player';
 import { version } from '../package.json';
