@@ -9,10 +9,11 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "lint": "biome lint src example",
+    "lint": "biome lint src example vite.config.mts vitest.config.mts",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
-    "start": "webpack serve --config webpack/webpack.dev.js",
+    "start": "vite",
+    "build:example": "vite build",
     "build": "tsc",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
@@ -49,17 +50,13 @@
     "@testing-library/react": "^16.2.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "html-webpack-plugin": "^5.6.3",
+    "@vitejs/plugin-react": "6.1.2",
     "jsdom": "^26.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4",
-    "webpack": "^5.99.9",
-    "webpack-cli": "^6.0.1",
-    "webpack-dev-server": "^5.2.2",
-    "webpack-merge": "^6.0.1"
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
   },
   "dependencies": {
     "@gumlet/insights-js-core": "^4.2.1",
