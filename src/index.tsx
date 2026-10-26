@@ -1,10 +1,11 @@
 import { GumletInsights } from '@gumlet/insights-js-core';
 // biome-ignore lint/style/useImportType: TypeScript uses the classic JSX transform.
 import React, { forwardRef, useEffect, useRef } from 'react';
-import shaka from 'shaka-player';
+import type shaka from 'shaka-player';
 import { version } from '../package.json';
 import { buildEmbedPlayerConfig, lockHighestVariant } from './drm/abrSettings';
 import { applyDrm } from './drm/applyDrm';
+import { loadShaka, setActiveShaka } from './loadShaka';
 import { parsePlaybackUrl } from './playbackUrl';
 import type { HlsPlayerProps, TimeEventData } from './types';
 
@@ -72,6 +73,7 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
       drm,
       enableInsights = true,
       insights,
+      debug = false,
       maxFatalRetries = DEFAULT_MAX_FATAL_RETRIES,
       onReady,
       onPlay,
@@ -233,126 +235,163 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
         throw error instanceof Error ? error : new Error(message);
       }
 
-      if (!shaka.Player.isBrowserSupported()) {
-        const message = 'Browser does not support Shaka Player';
-        console.error(message);
-        callbacksRef.current.onError?.({
-          fatal: true,
-          source: 'shaka',
-          message,
-        });
-        callbacksRef.current.getPlayerRef?.(null);
-        return;
-      }
-
       let destroyed = false;
       let fatalRetries = 0;
       let unbindDrm = () => {};
       let insightsClient: GumletInsights | undefined;
-
-      shaka.polyfill.installAll();
-
-      const player = new shaka.Player();
-      window.shaka = shaka;
-      window.shakaPlayer = player;
-      callbacksRef.current.getPlayerRef?.(player);
-
-      const drmConfig = {
-        widevineLicenseUri,
-        widevineRobustness,
-        organizationId,
-        collectionId,
-        fairplayLicenseUri,
-        fairplayCertificateUri,
-      };
-      const fairPlay = Boolean(fairplayLicenseUri && fairplayCertificateUri);
-
-      function finishLoad() {
-        if (destroyed) {
-          return;
-        }
-        if (startHighestRes) {
-          lockHighestVariant(player);
-        }
-        callbacksRef.current.onManifestParsed?.();
-        callbacksRef.current.onReady?.();
-        if (autoPlayRef.current) {
-          playIfAllowed(media);
-        }
-      }
-
-      function onShakaError(event: Event) {
-        if (destroyed) {
-          return;
-        }
-        const detail = shakaErrorDetail(event);
-        const fatal = detail?.severity === shaka.util.Error.Severity.CRITICAL;
-        const code = typeof detail?.code === 'number' ? detail.code : undefined;
-        callbacksRef.current.onError?.({
-          fatal,
-          source: 'shaka',
-          data: detail,
-          message: detail?.message || (code != null ? String(code) : undefined),
-        });
-
-        if (!fatal) {
-          return;
-        }
-
-        if (code != null && isNonRetryableDrmCode(code)) {
-          console.error('Shaka DRM error', detail);
-          return;
-        }
-
-        fatalRetries += 1;
-        console.error('Shaka fatal error', detail);
-
-        if (fatalRetries > maxFatalRetries) {
-          console.error(
-            `Shaka fatal error: exhausted ${maxFatalRetries} retries`,
-            detail
-          );
-          return;
-        }
-
-        player
-          .load(src)
-          .then(finishLoad)
-          .catch(() => {});
-      }
-
-      function onAdaptation() {
-        const active = player.getVariantTracks().find((track) => track.active);
-        if (!active) {
-          return;
-        }
-        callbacksRef.current.onQualityChange?.({
-          level: active.id,
-          height: active.height ?? undefined,
-          bitrate: active.bandwidth,
-        });
-      }
-
-      player.addEventListener('error', onShakaError);
-      player.addEventListener('adaptation', onAdaptation);
+      let player: shaka.Player | undefined;
+      let onShakaError: ((event: Event) => void) | undefined;
+      let onAdaptation: (() => void) | undefined;
 
       void (async () => {
+        let shakaNs: Awaited<ReturnType<typeof loadShaka>>;
         try {
-          await player.attach(media);
+          shakaNs = await loadShaka(debug);
+        } catch (error) {
+          if (destroyed) {
+            return;
+          }
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to load Shaka Player';
+          console.error(message);
+          callbacksRef.current.onError?.({
+            fatal: true,
+            source: 'shaka',
+            message,
+          });
+          callbacksRef.current.getPlayerRef?.(null);
+          return;
+        }
+        if (destroyed) {
+          return;
+        }
+        setActiveShaka(shakaNs);
+
+        if (!shakaNs.Player.isBrowserSupported()) {
+          const message = 'Browser does not support Shaka Player';
+          console.error(message);
+          callbacksRef.current.onError?.({
+            fatal: true,
+            source: 'shaka',
+            message,
+          });
+          callbacksRef.current.getPlayerRef?.(null);
+          return;
+        }
+
+        shakaNs.polyfill.installAll();
+
+        const created = new shakaNs.Player();
+        player = created;
+        if (destroyed) {
+          void created.destroy();
+          return;
+        }
+        window.shakaPlayer = created;
+        callbacksRef.current.getPlayerRef?.(created);
+
+        const drmConfig = {
+          widevineLicenseUri,
+          widevineRobustness,
+          organizationId,
+          collectionId,
+          fairplayLicenseUri,
+          fairplayCertificateUri,
+        };
+        const fairPlay = Boolean(fairplayLicenseUri && fairplayCertificateUri);
+
+        function finishLoad() {
+          if (destroyed) {
+            return;
+          }
+          if (startHighestRes) {
+            lockHighestVariant(created);
+          }
+          callbacksRef.current.onManifestParsed?.();
+          callbacksRef.current.onReady?.();
+          if (autoPlayRef.current) {
+            playIfAllowed(media);
+          }
+        }
+
+        onShakaError = (event: Event) => {
+          if (destroyed) {
+            return;
+          }
+          const detail = shakaErrorDetail(event);
+          const fatal =
+            detail?.severity === shakaNs.util.Error.Severity.CRITICAL;
+          const code =
+            typeof detail?.code === 'number' ? detail.code : undefined;
+          callbacksRef.current.onError?.({
+            fatal,
+            source: 'shaka',
+            data: detail,
+            message:
+              detail?.message || (code != null ? String(code) : undefined),
+          });
+
+          if (!fatal) {
+            return;
+          }
+
+          if (code != null && isNonRetryableDrmCode(code)) {
+            console.error('Shaka DRM error', detail);
+            return;
+          }
+
+          fatalRetries += 1;
+          console.error('Shaka fatal error', detail);
+
+          if (fatalRetries > maxFatalRetries) {
+            console.error(
+              `Shaka fatal error: exhausted ${maxFatalRetries} retries`,
+              detail
+            );
+            return;
+          }
+
+          created
+            .load(src)
+            .then(finishLoad)
+            .catch(() => {});
+        };
+
+        onAdaptation = () => {
+          const activeTrack = created
+            .getVariantTracks()
+            .find((track) => track.active);
+          if (!activeTrack) {
+            return;
+          }
+          callbacksRef.current.onQualityChange?.({
+            level: activeTrack.id,
+            height: activeTrack.height ?? undefined,
+            bitrate: activeTrack.bandwidth,
+          });
+        };
+
+        created.addEventListener('error', onShakaError);
+        created.addEventListener('adaptation', onAdaptation);
+
+        try {
+          await created.attach(media);
           if (destroyed) {
             return;
           }
           if (playerConfig) {
-            player.configure(playerConfig);
+            created.configure(playerConfig);
           }
-          player.configure(
+          created.configure(
             buildEmbedPlayerConfig({
               aspectRatio,
               startHighestRes,
               fairPlay,
             })
           );
-          unbindDrm = applyDrm(player, drmConfig);
+          unbindDrm = applyDrm(created, drmConfig);
           if (enableInsights && !destroyed) {
             insightsClient = new GumletInsights({
               ...insights,
@@ -362,7 +401,7 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
               customPlayerVersion: version,
             });
             try {
-              await insightsClient.attach(player, {
+              await insightsClient.attach(created, {
                 mediaElement: media,
                 starttime,
               });
@@ -374,7 +413,7 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
               return;
             }
           }
-          await player.load(src);
+          await created.load(src);
           finishLoad();
         } catch {
           /* Shaka also dispatches `error`, which owns retry. */
@@ -385,17 +424,24 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
         destroyed = true;
         insightsClient?.detach();
         unbindDrm();
-        player.removeEventListener('error', onShakaError);
-        player.removeEventListener('adaptation', onAdaptation);
-        void player.destroy();
-        if (window.shakaPlayer === player) {
-          window.shakaPlayer = undefined;
+        if (player) {
+          if (onShakaError) {
+            player.removeEventListener('error', onShakaError);
+          }
+          if (onAdaptation) {
+            player.removeEventListener('adaptation', onAdaptation);
+          }
+          void player.destroy();
+          if (window.shakaPlayer === player) {
+            window.shakaPlayer = undefined;
+          }
         }
         callbacksRef.current.getPlayerRef?.(null);
       };
     }, [
       aspectRatio,
       collectionId,
+      debug,
       enableInsights,
       fairplayCertificateUri,
       fairplayLicenseUri,

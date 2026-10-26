@@ -12,6 +12,7 @@ Replaces hls.js with Shaka Player. Breaking: `hlsConfig`, `getHLSRef`, `preferNa
 - `getPlayerRef` exposes `shaka.Player`. `window.shaka` and `window.shakaPlayer` are set for the active instance.
 - `muted`, `autoPlay`, `controls`, `loop`, `playsInline`, and other video attributes stay on the element. `autoPlay` calls `play()` after `load()` without recreating the player when the flag changes.
 - Gumlet Insights (`@gumlet/insights-js-core`) starts by default. `src` is always parsed as `/{collection_id}/{asset_id}/main.m3u8` or `main.mpd` before Shaka is created. A missing id calls `onError` and throws. `workspace_id` is the collection id and `customVideoId` is the asset id. `customPlayerName` is `gumlet-react-hls-player` and `customPlayerVersion` is this package version. `enableInsights={false}` skips the SDK only. (`src/playbackUrl.ts`, `src/index.tsx`)
+- `debug` loads `shaka-player.compiled.debug.js` and sets Shaka's log level to DEBUG. The default stays the release build, so the debug file is a separate import. (`src/loadShaka.ts`, `src/index.tsx`)
 
 ### Bug Fix
 - Fatal Shaka errors (severity `CRITICAL`) call `load(src)` again up to `maxFatalRetries` (default 3). DRM codes `6000–6010` and `3014–3016` are reported and not retried.

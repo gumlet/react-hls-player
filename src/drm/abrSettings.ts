@@ -1,4 +1,5 @@
-import shaka from 'shaka-player';
+import type shaka from 'shaka-player';
+import { getShaka } from '../loadShaka';
 
 /** Same ABR knobs as the embed player's ABR_SETTINGS. */
 export const ABR_SETTINGS = {
@@ -95,7 +96,10 @@ export function buildEmbedPlayerConfig(options: {
       bufferingGoal: 20,
       ...(options.fairPlay ? { useNativeHlsForFairPlay: false } : {}),
     },
-    textDisplayFactory: () => new shaka.text.StubTextDisplayer(),
+    textDisplayFactory: () => {
+      const TextDisplayer = getShaka().text.StubTextDisplayer;
+      return new TextDisplayer();
+    },
   };
 }
 

@@ -48,12 +48,13 @@ function App() {
   const logIdRef = useRef(0);
   const lastHighFreqRef = useRef<Record<string, number>>({});
   const [hlsUrl, setHlsUrl] = useState(
-    'https://video.gumlet.io/5f462c1561cf8a766464ffc4/635789f017629894d4d125a4/main.m3u8'
+    'https://video.gumlet.io/5f462c1561cf8a766464ffc4/635789f017629894d4d125a4/main.mpd'
   );
   const [destroy, setDestroy] = useState(false);
   const [muted, setMuted] = useState(true);
   const [autoPlay, setAutoPlay] = useState(true);
   const [startHighestRes, setStartHighestRes] = useState(false);
+  const [debug, setDebug] = useState(false);
   const [widevineLicenseUri, setWidevineLicenseUri] = useState('');
   const [fairplayLicenseUri, setFairplayLicenseUri] = useState('');
   const [fairplayCertificateUri, setFairplayCertificateUri] = useState('');
@@ -222,6 +223,15 @@ function App() {
         />{' '}
         start highest resolution
       </label>
+      <label htmlFor="shaka-debug" style={checkStyle}>
+        <input
+          id="shaka-debug"
+          type="checkbox"
+          checked={debug}
+          onChange={(event) => setDebug(event.target.checked)}
+        />{' '}
+        debug
+      </label>
 
       {!destroy ? (
         <HlsPlayer
@@ -236,6 +246,7 @@ function App() {
           playerRef={playerRef}
           src={hlsUrl}
           startHighestRes={startHighestRes}
+          debug={debug}
           drm={drm}
           getPlayerRef={(player) => {
             appendLog('getPlayerRef', player ? 'shaka.Player' : null);

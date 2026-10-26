@@ -1,4 +1,5 @@
-import shaka from 'shaka-player';
+import type shaka from 'shaka-player';
+import { getShaka } from '../loadShaka';
 
 export function stringToArray(string: string) {
   const buffer = new ArrayBuffer(string.length * 2);
@@ -15,7 +16,7 @@ export function arrayToString(array: Uint16Array) {
 }
 
 export function extractContentId(initData: BufferSource) {
-  let contentId = shaka.util.StringUtils.fromBytesAutoDetect(initData);
+  let contentId = getShaka().util.StringUtils.fromBytesAutoDetect(initData);
   if (contentId.includes('skd://')) {
     contentId = contentId.split('skd://')[1];
   }
@@ -93,7 +94,8 @@ function isFairPlayLicense(
   request: shaka.extern.Request,
   licenseUri: string
 ): boolean {
-  if (type !== shaka.net.NetworkingEngine.RequestType.LICENSE) return false;
+  if (type !== getShaka().net.NetworkingEngine.RequestType.LICENSE)
+    return false;
   const keySystem = request.drmInfo?.keySystem ?? '';
   if (keySystem.startsWith('com.apple.fps')) return true;
   return request.uris.some((uri) => uri === licenseUri);

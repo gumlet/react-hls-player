@@ -4,11 +4,12 @@ import React, { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { version } from '../package.json';
 import { ReactHlsPlayer } from './index';
+import { resetShakaLoaderForTests } from './loadShaka';
 
 type Handler = (event: Event) => void;
 
-const { instances, MockShaka, insightsInstances, MockInsights } = vi.hoisted(
-  () => {
+const { instances, videoTracks, MockShaka, insightsInstances, MockInsights } =
+  vi.hoisted(() => {
     const instances: MockPlayer[] = [];
     const insightsInstances: MockInsightsClient[] = [];
 
@@ -21,6 +22,8 @@ const { instances, MockShaka, insightsInstances, MockInsights } = vi.hoisted(
       }
     }
 
+    const videoTracks: MockVideoTrack[] = [];
+
     class MockPlayer {
       static isBrowserSupported = vi.fn(() => true);
 
@@ -30,7 +33,7 @@ const { instances, MockShaka, insightsInstances, MockInsights } = vi.hoisted(
       destroy = vi.fn().mockResolvedValue(undefined);
       selectVideoTrack = vi.fn();
       getVariantTracks = vi.fn(() => [] as MockTrack[]);
-      getVideoTracks = vi.fn(() => [] as MockVideoTrack[]);
+      getVideoTracks = vi.fn(() => videoTracks);
       handlers: Record<string, Handler[]> = {};
       networking = {
         registerRequestFilter: vi.fn(),
@@ -70,6 +73,10 @@ const { instances, MockShaka, insightsInstances, MockInsights } = vi.hoisted(
     const MockShaka = {
       polyfill: { installAll: vi.fn() },
       Player: MockPlayer,
+      log: {
+        setLevel: vi.fn(),
+        Level: { DEBUG: 4 },
+      },
       util: {
         Error: {
           Severity: { CRITICAL: 2, RECOVERABLE: 1 },
@@ -84,12 +91,12 @@ const { instances, MockShaka, insightsInstances, MockInsights } = vi.hoisted(
 
     return {
       instances,
+      videoTracks,
       MockShaka,
       insightsInstances,
       MockInsights: MockInsightsClient,
     };
-  }
-);
+  });
 
 type MockTrack = {
   id: number;
@@ -122,7 +129,11 @@ type MockPlayer = {
   emit: (type: string, event: Event) => void;
 };
 
-vi.mock('shaka-player', () => ({
+vi.mock('shaka-player/dist/shaka-player.compiled.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.compiled.debug.js', () => ({
   default: MockShaka,
 }));
 
@@ -146,7 +157,9 @@ function embedConfig(player: MockPlayer) {
 afterEach(() => {
   cleanup();
   instances.length = 0;
+  videoTracks.length = 0;
   insightsInstances.length = 0;
+  resetShakaLoaderForTests();
   vi.clearAllMocks();
   MockShaka.Player.isBrowserSupported.mockReturnValue(true);
 });
@@ -169,11 +182,14 @@ describe('ReactHlsPlayer', () => {
       />
     );
 
-    expect(instances).toHaveLength(1);
+    await waitFor(() => {
+      expect(instances).toHaveLength(1);
+    });
     expect(window.shaka).toBe(MockShaka);
     expect(window.shakaPlayer).toBe(instances[0]);
     expect(playerRef.current?.getAttribute('src')).toBeNull();
     expect(getPlayerRef).toHaveBeenCalledWith(instances[0]);
+    expect(MockShaka.log.setLevel).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(instances[0].attach).toHaveBeenCalledWith(playerRef.current);
@@ -251,17 +267,17 @@ describe('ReactHlsPlayer', () => {
   });
 
   it('locks the tallest variant when startHighestRes is set', async () => {
+    videoTracks.push(
+      { width: 640, height: 360, hdr: 'SDR' },
+      { width: 1920, height: 1080, hdr: 'SDR' }
+    );
+
     render(
       <ReactHlsPlayer
         src="https://cdn.example/collection/asset/main.m3u8"
         startHighestRes
       />
     );
-
-    instances[0].getVideoTracks.mockReturnValue([
-      { width: 640, height: 360, hdr: 'SDR' },
-      { width: 1920, height: 1080, hdr: 'SDR' },
-    ]);
 
     await waitFor(() => {
       expect(instances[0].selectVideoTrack).toHaveBeenCalledWith(
@@ -390,7 +406,7 @@ describe('ReactHlsPlayer', () => {
     });
   });
 
-  it('reports an error when Shaka is not supported', () => {
+  it('reports an error when Shaka is not supported', async () => {
     MockShaka.Player.isBrowserSupported.mockReturnValue(false);
     const onError = vi.fn();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -402,15 +418,34 @@ describe('ReactHlsPlayer', () => {
       />
     );
 
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fatal: true,
+          source: 'shaka',
+          message: 'Browser does not support Shaka Player',
+        })
+      );
+    });
     expect(instances).toHaveLength(0);
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fatal: true,
-        source: 'shaka',
-        message: 'Browser does not support Shaka Player',
-      })
-    );
     errorSpy.mockRestore();
+  });
+
+  it('loads the debug build and sets the DEBUG log level', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        debug
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalled();
+    });
+    expect(MockShaka.log.setLevel).toHaveBeenCalledWith(
+      MockShaka.log.Level.DEBUG
+    );
+    expect(window.shaka).toBe(MockShaka);
   });
 
   it('retries fatal errors and stops after maxFatalRetries', async () => {

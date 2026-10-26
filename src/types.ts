@@ -88,6 +88,8 @@ export interface HlsPlayerProps extends NativeVideoProps {
   drm?: DrmConfig;
   enableInsights?: boolean;
   insights?: InsightsConfig;
+  /** Load `shaka-player.compiled.debug.js` and set Shaka's log level to DEBUG. */
+  debug?: boolean;
   maxFatalRetries?: number;
   onReady?: () => void;
   onPlay?: () => void;
