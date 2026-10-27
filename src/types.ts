@@ -1,6 +1,20 @@
-import type Hls from 'hls.js';
-import type { ErrorData, HlsConfig } from 'hls.js';
+import type { AnalyticsConfig } from '@gumlet/insights-js-core';
+import type shaka from 'shaka-player';
 import type React from 'react';
+
+export type { AnalyticsConfig };
+
+/** Insights fields this player accepts. Workspace id and player identity are set internally. */
+export type InsightsConfig = Omit<
+  AnalyticsConfig,
+  | 'workspace_id'
+  | 'customWorkspaceId'
+  | 'customPlayerName'
+  | 'customPlayerVersion'
+  | 'customPlayerIntegrationVersion'
+  | 'mediaElement'
+  | 'cast'
+>;
 
 export interface TimeEventData {
   currentTime: number;
@@ -24,10 +38,30 @@ export interface QualityChangeData {
 
 export interface PlayerErrorData {
   fatal: boolean;
-  source: 'hls' | 'video';
-  data?: ErrorData;
+  source: 'shaka' | 'video';
+  data?: shaka.util.Error;
   mediaError?: MediaError | null;
   message?: string;
+}
+
+type DeepPartial<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly unknown[]
+    ? T
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T;
+
+/** Partial Shaka config. Embed ABR, retry, buffering, and DRM are applied after it. */
+export type PlayerConfig = DeepPartial<shaka.extern.PlayerConfiguration>;
+
+export interface DrmConfig {
+  widevineLicenseUri?: string;
+  widevineRobustness?: string | null;
+  organizationId?: string | null;
+  collectionId?: string | null;
+  fairplayLicenseUri?: string;
+  fairplayCertificateUri?: string;
 }
 
 type NativeVideoProps = Omit<
@@ -46,10 +80,16 @@ type NativeVideoProps = Omit<
 
 export interface HlsPlayerProps extends NativeVideoProps {
   src: string;
-  hlsConfig?: Partial<HlsConfig>;
+  playerConfig?: PlayerConfig;
   playerRef?: React.Ref<HTMLVideoElement | null>;
-  getHLSRef?: (hlsObj: Hls | null) => void;
-  preferNativeHls?: boolean;
+  getPlayerRef?: (player: shaka.Player | null) => void;
+  aspectRatio?: string;
+  startHighestRes?: boolean;
+  drm?: DrmConfig;
+  enableInsights?: boolean;
+  insights?: InsightsConfig;
+  /** Load the debug build for this manifest (HLS, DASH, or full) and set Shaka's log level to DEBUG. */
+  debug?: boolean;
   maxFatalRetries?: number;
   onReady?: () => void;
   onPlay?: () => void;

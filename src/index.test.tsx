@@ -1,232 +1,541 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
-import Hls from 'hls.js';
+// biome-ignore lint/correctness/noUnusedImports: React is required by the classic JSX transform.
 import React, { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ReactHlsPlayer from './index';
+import { version } from '../package.json';
+import { ReactHlsPlayer } from './index';
+import { resetShakaLoaderForTests } from './loadShaka';
 
-type HlsHandler = (...args: unknown[]) => void;
+type Handler = (event: Event) => void;
 
-const { instances, MockHls } = vi.hoisted(() => {
-  const instances: MockHls[] = [];
+const { instances, videoTracks, MockShaka, insightsInstances, MockInsights } =
+  vi.hoisted(() => {
+    const instances: MockPlayer[] = [];
+    const insightsInstances: MockInsightsClient[] = [];
 
-  class MockHls {
-    static isSupported = vi.fn(() => true);
-    static Events = {
-      MEDIA_ATTACHED: 'hlsMediaAttached',
-      MANIFEST_PARSED: 'hlsManifestParsed',
-      LEVEL_SWITCHED: 'hlsLevelSwitched',
-      ERROR: 'hlsError',
-    };
-    static ErrorTypes = {
-      NETWORK_ERROR: 'networkError',
-      MEDIA_ERROR: 'mediaError',
-      OTHER_ERROR: 'otherError',
-    };
+    class MockInsightsClient {
+      attach = vi.fn().mockResolvedValue(undefined);
+      detach = vi.fn();
 
-    attachMedia = vi.fn();
-    loadSource = vi.fn();
-    startLoad = vi.fn();
-    recoverMediaError = vi.fn();
-    destroy = vi.fn();
-    levels: { height?: number; bitrate?: number }[] = [];
-    handlers: Record<string, HlsHandler[]> = {};
-
-    constructor(public config?: unknown) {
-      instances.push(this);
-    }
-
-    on(event: string, handler: HlsHandler) {
-      this.handlers[event] = this.handlers[event] ?? [];
-      this.handlers[event].push(handler);
-    }
-
-    emit(event: string, ...args: unknown[]) {
-      for (const handler of this.handlers[event] ?? []) {
-        handler(event, ...args);
+      constructor(public config: unknown) {
+        insightsInstances.push(this);
       }
     }
-  }
 
-  return { instances, MockHls };
-});
+    const videoTracks: MockVideoTrack[] = [];
 
-vi.mock('hls.js', () => ({
-  default: MockHls,
+    class MockPlayer {
+      static isBrowserSupported = vi.fn(() => true);
+
+      attach = vi.fn().mockResolvedValue(undefined);
+      load = vi.fn().mockResolvedValue(undefined);
+      configure = vi.fn();
+      destroy = vi.fn().mockResolvedValue(undefined);
+      selectVideoTrack = vi.fn();
+      getVariantTracks = vi.fn(() => [] as MockTrack[]);
+      getVideoTracks = vi.fn(() => videoTracks);
+      handlers: Record<string, Handler[]> = {};
+      networking = {
+        registerRequestFilter: vi.fn(),
+        registerResponseFilter: vi.fn(),
+        unregisterRequestFilter: vi.fn(),
+        unregisterResponseFilter: vi.fn(),
+      };
+
+      constructor() {
+        instances.push(this);
+      }
+
+      addEventListener(type: string, handler: Handler) {
+        this.handlers[type] = this.handlers[type] ?? [];
+        this.handlers[type].push(handler);
+      }
+
+      removeEventListener(type: string, handler: Handler) {
+        this.handlers[type] = (this.handlers[type] ?? []).filter(
+          (item) => item !== handler
+        );
+      }
+
+      getNetworkingEngine() {
+        return this.networking;
+      }
+
+      emit(type: string, event: Event) {
+        for (const handler of this.handlers[type] ?? []) {
+          handler(event);
+        }
+      }
+    }
+
+    class StubTextDisplayer {}
+
+    const MockShaka = {
+      polyfill: { installAll: vi.fn() },
+      Player: MockPlayer,
+      log: {
+        setLevel: vi.fn(),
+        Level: { DEBUG: 4 },
+      },
+      util: {
+        Error: {
+          Severity: { CRITICAL: 2, RECOVERABLE: 1 },
+        },
+        StringUtils: { fromBytesAutoDetect: vi.fn() },
+      },
+      net: {
+        NetworkingEngine: { RequestType: { LICENSE: 'license' } },
+      },
+      text: { StubTextDisplayer },
+    };
+
+    return {
+      instances,
+      videoTracks,
+      MockShaka,
+      insightsInstances,
+      MockInsights: MockInsightsClient,
+    };
+  });
+
+type MockTrack = {
+  id: number;
+  active: boolean;
+  height: number | null;
+  bandwidth: number;
+};
+
+type MockVideoTrack = {
+  width: number | null;
+  height: number | null;
+  hdr: string | null;
+  active?: boolean;
+};
+
+type MockPlayer = {
+  attach: ReturnType<typeof vi.fn>;
+  load: ReturnType<typeof vi.fn>;
+  configure: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+  selectVideoTrack: ReturnType<typeof vi.fn>;
+  getVariantTracks: ReturnType<typeof vi.fn>;
+  getVideoTracks: ReturnType<typeof vi.fn>;
+  networking: {
+    registerRequestFilter: ReturnType<typeof vi.fn>;
+    registerResponseFilter: ReturnType<typeof vi.fn>;
+    unregisterRequestFilter: ReturnType<typeof vi.fn>;
+    unregisterResponseFilter: ReturnType<typeof vi.fn>;
+  };
+  emit: (type: string, event: Event) => void;
+};
+
+vi.mock('shaka-player/dist/shaka-player.compiled.js', () => ({
+  default: MockShaka,
 }));
+
+vi.mock('shaka-player/dist/shaka-player.compiled.debug.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.hls.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.hls.debug.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.dash.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.dash.debug.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('@gumlet/insights-js-core', () => ({
+  GumletInsights: MockInsights,
+}));
+
+function fatalError(code: number, message = 'failed') {
+  return new CustomEvent('error', {
+    detail: { severity: 2, code, message },
+  });
+}
+
+function embedConfig(player: MockPlayer) {
+  const call = player.configure.mock.calls.find(
+    (args) => args[0]?.manifest?.disableText === true
+  );
+  return call?.[0];
+}
 
 afterEach(() => {
   cleanup();
   instances.length = 0;
+  videoTracks.length = 0;
+  insightsInstances.length = 0;
+  resetShakaLoaderForTests();
   vi.clearAllMocks();
-  MockHls.isSupported.mockReturnValue(true);
+  MockShaka.Player.isBrowserSupported.mockReturnValue(true);
 });
 
 beforeEach(() => {
   HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
   HTMLMediaElement.prototype.load = vi.fn();
-  HTMLMediaElement.prototype.canPlayType = vi.fn().mockReturnValue('');
 });
 
 describe('ReactHlsPlayer', () => {
-  it('attaches hls.js, loads src, and exposes the instance', async () => {
-    const getHLSRef = vi.fn();
+  it('attaches Shaka, loads src, and exposes the instance', async () => {
+    const getPlayerRef = vi.fn();
     const playerRef = createRef<HTMLVideoElement>();
 
     const { unmount } = render(
       <ReactHlsPlayer
-        src="https://example.com/vod.m3u8"
+        src="https://cdn.example/collection/asset/main.m3u8"
         playerRef={playerRef}
-        getHLSRef={getHLSRef}
+        getPlayerRef={getPlayerRef}
       />
     );
 
-    expect(instances).toHaveLength(1);
-    expect(window.Hls).toBe(Hls);
-    expect(instances[0].attachMedia).toHaveBeenCalledWith(playerRef.current);
-    expect(getHLSRef).toHaveBeenCalledWith(instances[0]);
+    await waitFor(() => {
+      expect(instances).toHaveLength(1);
+    });
+    expect(window.shaka).toBe(MockShaka);
+    expect(window.shakaPlayer).toBe(instances[0]);
+    expect(playerRef.current?.getAttribute('src')).toBeNull();
+    expect(getPlayerRef).toHaveBeenCalledWith(instances[0]);
+    expect(MockShaka.log.setLevel).not.toHaveBeenCalled();
 
-    instances[0].emit(MockHls.Events.MEDIA_ATTACHED);
-    expect(instances[0].loadSource).toHaveBeenCalledWith(
-      'https://example.com/vod.m3u8'
-    );
+    await waitFor(() => {
+      expect(instances[0].attach).toHaveBeenCalledWith(playerRef.current);
+      expect(instances[0].load).toHaveBeenCalledWith(
+        'https://cdn.example/collection/asset/main.m3u8'
+      );
+    });
 
     unmount();
     await waitFor(() => {
       expect(instances[0].destroy).toHaveBeenCalled();
-      expect(getHLSRef).toHaveBeenLastCalledWith(null);
+      expect(insightsInstances[0].detach).toHaveBeenCalled();
+      expect(getPlayerRef).toHaveBeenLastCalledWith(null);
+      expect(window.shakaPlayer).toBeUndefined();
     });
   });
 
-  it('works without playerRef', () => {
-    render(<ReactHlsPlayer src="https://example.com/live.m3u8" />);
-    expect(instances).toHaveLength(1);
-    expect(instances[0].attachMedia).toHaveBeenCalled();
+  it('applies embed ABR, retry, buffering, and text settings', async () => {
+    render(
+      <ReactHlsPlayer src="https://cdn.example/collection/asset/main.m3u8" />
+    );
+
+    await waitFor(() => {
+      expect(embedConfig(instances[0])).toBeTruthy();
+    });
+
+    const config = embedConfig(instances[0]);
+    expect(config.manifest).toMatchObject({
+      disableText: true,
+      retryParameters: {
+        maxAttempts: 6,
+        baseDelay: 1000,
+        backoffFactor: 2,
+        fuzzFactor: 0.5,
+        timeout: 30000,
+      },
+    });
+    expect(config.streaming).toMatchObject({
+      rebufferingGoal: 4,
+      bufferingGoal: 20,
+      retryParameters: {
+        maxAttempts: 6,
+        baseDelay: 500,
+        backoffFactor: 2,
+        fuzzFactor: 0.5,
+        timeout: 20000,
+      },
+    });
+    expect(config.abr).toMatchObject({
+      enabled: true,
+      restrictToElementSize: true,
+      useNetworkInformation: false,
+      defaultBandwidthEstimate: 3_000_000,
+      bandwidthUpgradeTarget: 0.85,
+      switchInterval: 8,
+      clearBufferSwitch: true,
+      safeMarginSwitch: 20,
+    });
+    expect(config.textDisplayFactory()).toBeInstanceOf(
+      MockShaka.text.StubTextDisplayer
+    );
   });
 
-  it('autoplays after MANIFEST_PARSED', () => {
-    const playerRef = createRef<HTMLVideoElement>();
+  it('turns off restrictToElementSize for portrait aspect ratio', async () => {
     render(
       <ReactHlsPlayer
-        src="https://example.com/vod.m3u8"
-        playerRef={playerRef}
-        autoPlay
+        src="https://cdn.example/collection/asset/main.m3u8"
+        aspectRatio="9:16"
       />
     );
 
-    instances[0].emit(MockHls.Events.MANIFEST_PARSED);
-    expect(playerRef.current?.play).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(embedConfig(instances[0])?.abr.restrictToElementSize).toBe(false);
+    });
   });
 
-  it('recovers fatal network errors and stops after maxFatalRetries', () => {
-    const getHLSRef = vi.fn();
+  it('locks the tallest variant when startHighestRes is set', async () => {
+    videoTracks.push(
+      { width: 640, height: 360, hdr: 'SDR' },
+      { width: 1920, height: 1080, hdr: 'SDR' }
+    );
+
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        startHighestRes
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].selectVideoTrack).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 1080, width: 1920 })
+      );
+    });
+    expect(embedConfig(instances[0]).abr.enabled).toBe(false);
+  });
+
+  it('applies playerConfig before embed settings', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        playerConfig={{ streaming: { bufferingGoal: 1 } }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].configure).toHaveBeenCalledTimes(2);
+    });
+
+    expect(instances[0].configure.mock.calls[0][0]).toMatchObject({
+      streaming: { bufferingGoal: 1 },
+    });
+    expect(
+      instances[0].configure.mock.calls[1][0].streaming.bufferingGoal
+    ).toBe(20);
+  });
+
+  it('configures Widevine robustness and license server', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        drm={{
+          widevineLicenseUri: 'https://license.example/wv',
+          widevineRobustness: 'L1',
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].configure).toHaveBeenCalledWith(
+        expect.objectContaining({
+          drm: {
+            servers: { 'com.widevine.alpha': 'https://license.example/wv' },
+            advanced: {
+              'com.widevine.alpha': {
+                videoRobustness: ['HW_SECURE_ALL'],
+                audioRobustness: ['SW_SECURE_CRYPTO'],
+              },
+            },
+          },
+        })
+      );
+    });
+  });
+
+  it('configures FairPlay filters, certificate, and MSE playback', async () => {
+    const { unmount } = render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        drm={{
+          fairplayLicenseUri: 'https://license.example/fp',
+          fairplayCertificateUri: 'https://cert.example/fp',
+          widevineLicenseUri: 'https://license.example/wv',
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].networking.registerRequestFilter).toHaveBeenCalled();
+      expect(instances[0].networking.registerResponseFilter).toHaveBeenCalled();
+    });
+
+    expect(instances[0].configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        drm: expect.objectContaining({
+          servers: { 'com.apple.fps': 'https://license.example/fp' },
+          advanced: {
+            'com.apple.fps': {
+              serverCertificateUri: 'https://cert.example/fp',
+            },
+          },
+        }),
+        streaming: { useNativeHlsForFairPlay: false },
+        preferredVideo: expect.arrayContaining([
+          expect.objectContaining({ codec: 'hvc1' }),
+        ]),
+      })
+    );
+    expect(instances[0].configure).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        drm: expect.objectContaining({
+          servers: { 'com.widevine.alpha': 'https://license.example/wv' },
+        }),
+      })
+    );
+
+    unmount();
+    expect(instances[0].networking.unregisterRequestFilter).toHaveBeenCalled();
+    expect(instances[0].networking.unregisterResponseFilter).toHaveBeenCalled();
+  });
+
+  it('passes muted, autoPlay, controls, loop, and playsInline to the video', async () => {
+    const playerRef = createRef<HTMLVideoElement>();
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        playerRef={playerRef}
+        muted
+        autoPlay
+        controls
+        loop
+        playsInline
+      />
+    );
+
+    const video = playerRef.current;
+    expect(video?.muted).toBe(true);
+    expect(video?.hasAttribute('controls')).toBe(true);
+    expect(video?.hasAttribute('loop')).toBe(true);
+    expect(video?.hasAttribute('playsinline')).toBe(true);
+
+    await waitFor(() => {
+      expect(video?.play).toHaveBeenCalled();
+    });
+  });
+
+  it('reports an error when Shaka is not supported', async () => {
+    MockShaka.Player.isBrowserSupported.mockReturnValue(false);
+    const onError = vi.fn();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     render(
       <ReactHlsPlayer
-        src="https://example.com/vod.m3u8"
-        getHLSRef={getHLSRef}
+        src="https://cdn.example/collection/asset/main.m3u8"
+        onError={onError}
+      />
+    );
+
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fatal: true,
+          source: 'shaka',
+          message: 'Browser does not support Shaka Player',
+        })
+      );
+    });
+    expect(instances).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it('loads the debug build and sets the DEBUG log level', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        debug
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalled();
+    });
+    expect(MockShaka.log.setLevel).toHaveBeenCalledWith(
+      MockShaka.log.Level.DEBUG
+    );
+    expect(window.shaka).toBe(MockShaka);
+  });
+
+  it('retries fatal errors and stops after maxFatalRetries', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
         maxFatalRetries={2}
       />
     );
 
-    const fatalNetwork = {
-      fatal: true,
-      type: MockHls.ErrorTypes.NETWORK_ERROR,
-    };
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalledTimes(1);
+    });
 
-    instances[0].emit(MockHls.Events.ERROR, fatalNetwork);
-    expect(instances[0].startLoad).toHaveBeenCalledTimes(1);
+    instances[0].emit('error', fatalError(1001));
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalledTimes(2);
+    });
 
-    instances[0].emit(MockHls.Events.ERROR, fatalNetwork);
-    expect(instances[0].startLoad).toHaveBeenCalledTimes(2);
+    instances[0].emit('error', fatalError(1001));
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalledTimes(3);
+    });
 
-    instances[0].emit(MockHls.Events.ERROR, fatalNetwork);
-    expect(instances[0].destroy).toHaveBeenCalled();
-    expect(getHLSRef).toHaveBeenLastCalledWith(null);
+    instances[0].emit('error', fatalError(1001));
+    expect(instances[0].load).toHaveBeenCalledTimes(3);
     expect(errorSpy).toHaveBeenCalled();
-
     errorSpy.mockRestore();
   });
 
-  it('uses native HLS when MSE is unavailable', () => {
-    MockHls.isSupported.mockReturnValue(false);
-    HTMLMediaElement.prototype.canPlayType = vi.fn().mockReturnValue('maybe');
-
-    const playerRef = createRef<HTMLVideoElement>();
-    render(
-      <ReactHlsPlayer
-        src="https://example.com/native.m3u8"
-        playerRef={playerRef}
-      />
-    );
-
-    expect(instances).toHaveLength(0);
-    expect(playerRef.current?.getAttribute('src')).toBe(
-      'https://example.com/native.m3u8'
-    );
-  });
-
-  it('prefers native HLS by default when the browser can play it', () => {
-    MockHls.isSupported.mockReturnValue(true);
-    HTMLMediaElement.prototype.canPlayType = vi
-      .fn()
-      .mockReturnValue('probably');
-
-    render(<ReactHlsPlayer src="https://example.com/native.m3u8" />);
-
-    expect(instances).toHaveLength(0);
-  });
-
-  it('uses hls.js when preferNativeHls is false even if native HLS exists', () => {
-    MockHls.isSupported.mockReturnValue(true);
-    HTMLMediaElement.prototype.canPlayType = vi
-      .fn()
-      .mockReturnValue('probably');
+  it('does not retry DRM error codes', async () => {
+    const onError = vi.fn();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     render(
       <ReactHlsPlayer
-        src="https://example.com/vod.m3u8"
-        preferNativeHls={false}
+        src="https://cdn.example/collection/asset/main.m3u8"
+        onError={onError}
       />
     );
 
-    expect(instances).toHaveLength(1);
-  });
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalledTimes(1);
+    });
 
-  it('assigns both playerRef and forwarded ref to the video element', () => {
-    const playerRef = createRef<HTMLVideoElement>();
-    const forwardedRef = createRef<HTMLVideoElement>();
-
-    render(
-      <ReactHlsPlayer
-        ref={forwardedRef}
-        playerRef={playerRef}
-        src="https://example.com/vod.m3u8"
-      />
+    instances[0].emit('error', fatalError(6007, 'license'));
+    expect(instances[0].load).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fatal: true,
+        source: 'shaka',
+        message: 'license',
+      })
     );
-
-    expect(playerRef.current).toBeInstanceOf(HTMLVideoElement);
-    expect(forwardedRef.current).toBe(playerRef.current);
+    errorSpy.mockRestore();
   });
 
-  it('fires playback and hls.js callbacks', () => {
+  it('fires playback and adaptation callbacks', async () => {
     const onPlay = vi.fn();
     const onReady = vi.fn();
-    const onError = vi.fn();
     const onManifestParsed = vi.fn();
     const onQualityChange = vi.fn();
     const onTimeUpdate = vi.fn();
     const onProgress = vi.fn();
     const playerRef = createRef<HTMLVideoElement>();
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     render(
       <ReactHlsPlayer
-        src="https://example.com/vod.m3u8"
+        src="https://cdn.example/collection/asset/main.m3u8"
         playerRef={playerRef}
         onPlay={onPlay}
         onReady={onReady}
-        onError={onError}
         onManifestParsed={onManifestParsed}
         onQualityChange={onQualityChange}
         onTimeUpdate={onTimeUpdate}
@@ -252,49 +561,122 @@ describe('ReactHlsPlayer', () => {
     });
     expect(onProgress).toHaveBeenCalledWith({ percent: 0.25 });
 
-    instances[0].emit(MockHls.Events.MANIFEST_PARSED);
-    expect(onManifestParsed).toHaveBeenCalledTimes(1);
-    expect(onReady).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(onReady).toHaveBeenCalledTimes(1);
+      expect(onManifestParsed).toHaveBeenCalledTimes(1);
+    });
 
-    instances[0].levels = [{ height: 720, bitrate: 1_200_000 }];
-    instances[0].emit(MockHls.Events.LEVEL_SWITCHED, { level: 0 });
+    instances[0].getVariantTracks.mockReturnValue([
+      { id: 3, active: true, height: 720, bandwidth: 1_200_000 },
+    ]);
+    instances[0].emit('adaptation', new Event('adaptation'));
     expect(onQualityChange).toHaveBeenCalledWith({
-      level: 0,
+      level: 3,
       height: 720,
       bitrate: 1_200_000,
     });
-
-    instances[0].emit(MockHls.Events.ERROR, {
-      fatal: true,
-      type: MockHls.ErrorTypes.NETWORK_ERROR,
-      details: 'fragLoadError',
-    });
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fatal: true,
-        source: 'hls',
-        message: 'fragLoadError',
-      })
-    );
-
-    errorSpy.mockRestore();
   });
 
-  it('fires onReady from native loadedmetadata', () => {
-    MockHls.isSupported.mockReturnValue(false);
-    HTMLMediaElement.prototype.canPlayType = vi.fn().mockReturnValue('maybe');
-    const onReady = vi.fn();
+  it('assigns both playerRef and forwarded ref to the video element', () => {
     const playerRef = createRef<HTMLVideoElement>();
+    const forwardedRef = createRef<HTMLVideoElement>();
 
     render(
       <ReactHlsPlayer
-        src="https://example.com/native.m3u8"
+        ref={forwardedRef}
         playerRef={playerRef}
-        onReady={onReady}
+        src="https://cdn.example/collection/asset/main.m3u8"
       />
     );
 
-    playerRef.current?.dispatchEvent(new Event('loadedmetadata'));
-    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(playerRef.current).toBeInstanceOf(HTMLVideoElement);
+    expect(forwardedRef.current).toBe(playerRef.current);
+  });
+
+  it('passes collection and asset ids to Insights', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://play.example/collection/asset/main.mpd?token=1"
+        insights={{ customData4: 'caller', customVideoTitle: 'Episode' }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(insightsInstances).toHaveLength(1);
+      expect(instances[0].load).toHaveBeenCalledWith(
+        'https://play.example/collection/asset/main.mpd?token=1'
+      );
+    });
+
+    expect(insightsInstances[0].config).toMatchObject({
+      workspace_id: 'collection',
+      customVideoId: 'asset',
+      customPlayerName: 'gumlet-react-hls-player',
+      customPlayerVersion: version,
+      customData4: 'caller',
+      customVideoTitle: 'Episode',
+    });
+    expect(insightsInstances[0].attach).toHaveBeenCalledWith(
+      instances[0],
+      expect.objectContaining({
+        mediaElement: expect.any(HTMLVideoElement),
+        starttime: expect.any(Number),
+      })
+    );
+  });
+
+  it('keeps a caller customVideoId', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        insights={{ customVideoId: 'override' }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(insightsInstances[0].config).toMatchObject({
+        workspace_id: 'collection',
+        customVideoId: 'override',
+      });
+    });
+  });
+
+  it('still loads when insights are disabled', async () => {
+    render(
+      <ReactHlsPlayer
+        src="https://cdn.example/collection/asset/main.m3u8"
+        enableInsights={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(instances[0].load).toHaveBeenCalled();
+    });
+    expect(insightsInstances).toHaveLength(0);
+  });
+
+  it('throws when the playback URL has no asset id', () => {
+    const onError = vi.fn();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() =>
+      render(
+        <ReactHlsPlayer
+          src="https://cdn.example/collection/main.m3u8"
+          enableInsights={false}
+          onError={onError}
+        />
+      )
+    ).toThrow(/asset id/);
+
+    expect(instances).toHaveLength(0);
+    expect(insightsInstances).toHaveLength(0);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fatal: true,
+        message: expect.stringMatching(/asset id/),
+      })
+    );
+    errorSpy.mockRestore();
   });
 });

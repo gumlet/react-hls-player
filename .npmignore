@@ -1,11 +1,8 @@
 .all-contributorsrc
-.eslintrc
-.prettierrc
+.biome.json
 tsconfig.json
 typings/
-webpack/
 src/
-public/
 node_modules/
 example/
 .vscode/
