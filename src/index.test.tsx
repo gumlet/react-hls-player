@@ -137,6 +137,22 @@ vi.mock('shaka-player/dist/shaka-player.compiled.debug.js', () => ({
   default: MockShaka,
 }));
 
+vi.mock('shaka-player/dist/shaka-player.hls.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.hls.debug.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.dash.js', () => ({
+  default: MockShaka,
+}));
+
+vi.mock('shaka-player/dist/shaka-player.dash.debug.js', () => ({
+  default: MockShaka,
+}));
+
 vi.mock('@gumlet/insights-js-core', () => ({
   GumletInsights: MockInsights,
 }));

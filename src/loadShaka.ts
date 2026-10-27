@@ -2,10 +2,19 @@ import type shaka from 'shaka-player';
 
 export type ShakaNamespace = typeof shaka;
 
+/** Prebuilt artifact selected from the manifest URL (or full `compiled` when unknown). */
+export type ShakaBuildVariant = 'dash' | 'hls' | 'compiled';
+
+export type LoadShakaOptions = {
+  debug?: boolean;
+  /** `.mpd` / `.m3u8` URL used to pick the dash/hls prebuilt. */
+  manifestUrl?: string | null;
+};
+
 type ShakaModule = { default?: ShakaNamespace } | ShakaNamespace;
 
-const cached = new Map<boolean, ShakaNamespace>();
-const inflight = new Map<boolean, Promise<ShakaNamespace>>();
+const cached = new Map<string, ShakaNamespace>();
+const inflight = new Map<string, Promise<ShakaNamespace>>();
 let active: ShakaNamespace | null = null;
 let generation = 0;
 
@@ -25,42 +34,96 @@ function enableDebugLogs(shakaNs: ShakaNamespace) {
   }
 }
 
+/** Map a manifest URL to the smallest Shaka prebuilt that can play it. */
+export function resolveShakaBuildVariant(
+  manifestUrl?: string | null
+): ShakaBuildVariant {
+  if (!manifestUrl) {
+    return 'compiled';
+  }
+  if (/\.m3u8(\?|#|$)/i.test(manifestUrl)) {
+    return 'hls';
+  }
+  if (/\.mpd(\?|#|$)/i.test(manifestUrl)) {
+    return 'dash';
+  }
+  return 'compiled';
+}
+
+function cacheKey(debug: boolean, variant: ShakaBuildVariant): string {
+  return `${debug ? 'debug' : 'prod'}:${variant}`;
+}
+
+async function importShakaBuild(
+  variant: ShakaBuildVariant,
+  debug: boolean
+): Promise<ShakaNamespace> {
+  let mod: ShakaModule;
+  if (debug) {
+    switch (variant) {
+      case 'dash':
+        mod = await import('shaka-player/dist/shaka-player.dash.debug.js');
+        break;
+      case 'hls':
+        mod = await import('shaka-player/dist/shaka-player.hls.debug.js');
+        break;
+      default:
+        mod = await import('shaka-player/dist/shaka-player.compiled.debug.js');
+    }
+  } else {
+    switch (variant) {
+      case 'dash':
+        mod = await import('shaka-player/dist/shaka-player.dash.js');
+        break;
+      case 'hls':
+        mod = await import('shaka-player/dist/shaka-player.hls.js');
+        break;
+      default:
+        mod = await import('shaka-player/dist/shaka-player.compiled.js');
+    }
+  }
+  return unwrap(mod);
+}
+
 /**
- * Load the compiled Shaka build, or the debug build when `debug` is set.
- * The debug file is a separate import so the release bundle does not include it.
+ * Load the Shaka prebuilt that matches the manifest. `.m3u8` uses the HLS
+ * build and `.mpd` uses the DASH build. `debug` selects that build's debug
+ * file and sets the log level to DEBUG. Each file is its own import.
  */
-export async function loadShaka(debug = false): Promise<ShakaNamespace> {
-  const hit = cached.get(debug);
+export async function loadShaka(
+  options: LoadShakaOptions = {}
+): Promise<ShakaNamespace> {
+  const debug = options.debug ?? false;
+  const variant = resolveShakaBuildVariant(options.manifestUrl);
+  const key = cacheKey(debug, variant);
+  const hit = cached.get(key);
   if (hit) {
     return hit;
   }
-  const pending = inflight.get(debug);
+  const pending = inflight.get(key);
   if (pending) {
     return pending;
   }
 
   const gen = generation;
   const promise = (async () => {
-    const mod = debug
-      ? await import('shaka-player/dist/shaka-player.compiled.debug.js')
-      : await import('shaka-player/dist/shaka-player.compiled.js');
-    const shakaNs = unwrap(mod);
+    const shakaNs = await importShakaBuild(variant, debug);
     if (gen !== generation) {
       return shakaNs;
     }
     if (debug) {
       enableDebugLogs(shakaNs);
     }
-    cached.set(debug, shakaNs);
+    cached.set(key, shakaNs);
     return shakaNs;
   })();
 
-  inflight.set(debug, promise);
+  inflight.set(key, promise);
   try {
     return await promise;
   } finally {
-    if (inflight.get(debug) === promise) {
-      inflight.delete(debug);
+    if (inflight.get(key) === promise) {
+      inflight.delete(key);
     }
   }
 }

@@ -207,7 +207,7 @@ Every load applies the embed player's Shaka settings:
 
 Fatal Shaka errors (severity `CRITICAL`) call `load(src)` again up to `maxFatalRetries` (default 3). DRM codes `6000–6010` and `3014–3016` are reported and not retried.
 
-`debug` loads Shaka's debug build (`shaka-player.compiled.debug.js`) and sets its log level to DEBUG. Leave it off for the release build. This is separate from `insights.debug`.
+An `.m3u8` URL loads `shaka-player.hls.js`. An `.mpd` URL loads `shaka-player.dash.js`. `debug` loads that build's debug file and sets its log level to DEBUG. Leave it off for the matching release build. This is separate from `insights.debug`.
 
 ```javascript
 <ReactHlsPlayer src={src} debug />
@@ -233,7 +233,7 @@ Other [video attributes](https://developer.mozilla.org/en-US/docs/Web/HTML/Eleme
 | `drm` | `DrmConfig`: Widevine and FairPlay fields |
 | `enableInsights` `boolean` | Start Gumlet Insights after the URL is parsed. Default `true` |
 | `insights` | Documented Insights fields. Workspace id and player name/version are set by this package |
-| `debug` `boolean` | Load Shaka's debug build and set its log level to DEBUG. Default `false` |
+| `debug` `boolean` | Load the debug file for this manifest and set Shaka's log level to DEBUG. Default `false` |
 | `maxFatalRetries` `number` | Fatal retries before giving up. Default `3` |
 | `onReady` | `load()` resolved |
 | `onPlay`, `onPause`, `onPlaying`, `onEnded`, `onWaiting` | Video playback state |

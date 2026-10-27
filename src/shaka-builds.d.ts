@@ -10,3 +10,23 @@ declare module 'shaka-player/dist/shaka-player.compiled.debug.js' {
   const shakaDebug: ShakaDefaultExport;
   export default shakaDebug;
 }
+
+declare module 'shaka-player/dist/shaka-player.hls.js' {
+  const shakaHls: ShakaDefaultExport;
+  export default shakaHls;
+}
+
+declare module 'shaka-player/dist/shaka-player.hls.debug.js' {
+  const shakaHlsDebug: ShakaDefaultExport;
+  export default shakaHlsDebug;
+}
+
+declare module 'shaka-player/dist/shaka-player.dash.js' {
+  const shakaDash: ShakaDefaultExport;
+  export default shakaDash;
+}
+
+declare module 'shaka-player/dist/shaka-player.dash.debug.js' {
+  const shakaDashDebug: ShakaDefaultExport;
+  export default shakaDashDebug;
+}

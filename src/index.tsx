@@ -246,7 +246,7 @@ const ReactHlsPlayer = forwardRef<HTMLVideoElement, HlsPlayerProps>(
       void (async () => {
         let shakaNs: Awaited<ReturnType<typeof loadShaka>>;
         try {
-          shakaNs = await loadShaka(debug);
+          shakaNs = await loadShaka({ debug, manifestUrl: src });
         } catch (error) {
           if (destroyed) {
             return;
