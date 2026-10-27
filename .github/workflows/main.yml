@@ -18,7 +18,7 @@ jobs:
           node-version: 24
       - name: Install, lint, and test
         run: |
-          npm ci
+          npm i
           npm run lint
           npm test
 
