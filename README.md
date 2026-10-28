@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@gumlet/react-hls-player?style=flat-square)](https://www.npmjs.com/package/@gumlet/react-hls-player)
 [![npm downloads](https://img.shields.io/npm/dm/@gumlet/react-hls-player?style=flat-square)](https://www.npmjs.com/package/@gumlet/react-hls-player)
 
-React component for **HLS and DASH** live and VOD. Playback uses [Shaka Player](https://github.com/shaka-project/shaka-player) 5.1 with the same ABR, retry, and buffering settings as the Gumlet embed player. Widevine and FairPlay use Gumlet's license helpers.
+React component for [Gumlet](https://www.gumlet.com) **HLS and DASH** live and VOD. `src` is the HLS or DASH URL from the [Gumlet dashboard](https://dash.gumlet.com). Playback uses [Shaka Player](https://github.com/shaka-project/shaka-player) 5.1 with the same ABR, retry, and buffering settings as the Gumlet embed player. Widevine and FairPlay use Gumlet's license helpers.
 
 ```bash
 npm i @gumlet/react-hls-player
@@ -46,7 +46,7 @@ createRoot(document.getElementById('app')).render(
 );
 ```
 
-Shaka loads `src`. The path must be `/{collection_id}/{asset_id}/main.m3u8` or `main.mpd` on any host. A missing collection id or asset id is reported with `onError` and thrown before Shaka is created. The URL is not set on the `<video>` element. `autoPlay` calls `play()` after `load()` resolves. Pair it with `muted` when the browser blocks autoplay with sound. `loop`, `playsInline`, `poster`, `preload`, `crossOrigin`, `width`, and `height` are normal video attributes.
+Shaka loads `src`. Use a [Gumlet](https://www.gumlet.com) HLS or DASH URL from the asset page in the [dashboard](https://dash.gumlet.com). The path is `/{collection_id}/{asset_id}/main.m3u8` for HLS or `main.mpd` for DASH. A missing collection id or asset id is reported with `onError` and thrown before Shaka is created. The URL is not set on the `<video>` element. `autoPlay` calls `play()` after `load()` resolves. Pair it with `muted` when the browser blocks autoplay with sound. `loop`, `playsInline`, `poster`, `preload`, `crossOrigin`, `width`, and `height` are normal video attributes.
 
 Changing `muted` or `autoPlay` updates the element without creating a new Shaka instance. Changing `src` or `drm` does.
 
@@ -219,7 +219,7 @@ Other [video attributes](https://developer.mozilla.org/en-US/docs/Web/HTML/Eleme
 
 | Prop | Description |
 | --- | --- |
-| `src` `string`, required | `/{collection_id}/{asset_id}/main.m3u8` or `main.mpd`. Any host |
+| `src` `string`, required | Gumlet HLS or DASH URL from the [dashboard](https://dash.gumlet.com): `/{collection_id}/{asset_id}/main.m3u8` or `main.mpd` |
 | `autoPlay` `boolean` | Call `play()` after `load()` resolves. Default `false` |
 | `muted` `boolean` | Mute the element before `play()` |
 | `controls` `boolean` | Native controls. Default `false` |
